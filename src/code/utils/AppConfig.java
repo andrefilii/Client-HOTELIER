@@ -11,7 +11,7 @@ public class AppConfig {
 
     private static Properties initialize() {
         Properties properties = new Properties();
-        try (FileInputStream input = new FileInputStream("src/resources/application.properties")) {
+        try (FileInputStream input = new FileInputStream("application.properties")) {
             properties.load(input);
         } catch (IOException e) {
             e.printStackTrace();

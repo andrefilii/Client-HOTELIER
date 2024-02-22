@@ -10,11 +10,10 @@ import com.google.gson.JsonSyntaxException;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.*;
+import java.util.InputMismatchException;
 import java.util.Scanner;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class ClientMain {
     private String hostName;
@@ -25,12 +24,14 @@ public class ClientMain {
     private Gson gson;
     private Thread listener;
     private AtomicBoolean stopListener;
+    private ReentrantLock consoleLock;
 
     public ClientMain() {
         hostName = AppConfig.getServerAddress();
         port = AppConfig.getServerPort();
         gson = new GsonBuilder().setPrettyPrinting().create();
         stopListener = new AtomicBoolean(false);
+        consoleLock = new ReentrantLock();
     }
 
     private void startBackgroundListener(String group, int port) {
@@ -39,19 +40,19 @@ public class ClientMain {
                 MulticastSocket ms = new MulticastSocket(port);
                 InetAddress ia = InetAddress.getByName(group);
                 ms.joinGroup(ia);
-                ms.setSoTimeout(2000); // ogni due secondi, se non riceve niente, controlla la guardia del while
+                ms.setSoTimeout(2000); // ogni due secondi, se non riceve niente, controlla la guardia del while (permette la corretta terminazione del programma)
 
-                byte[] buffer = new byte[1024];
+                byte[] buffer = new byte[2048];
                 DatagramPacket dp = new DatagramPacket(buffer, buffer.length);
                 while (!stopListener.get()) {
-                    System.out.println("Hi");
                     try {
                         ms.receive(dp);
-                        System.out.println("Dati arrivati");
-                        // TODO elaborare i dati e inserirli in una struttura dati
-                    } catch (SocketTimeoutException e) {
-                        System.out.println("Timeout");
-                    }
+                        int a = 2;
+                        consoleLock.lock();
+                        printLn("Nuovi primi posti:\n" + new String(dp.getData(), 0, dp.getLength()));
+                        consoleLock.unlock();
+
+                    } catch (SocketTimeoutException ignored) {}
                 }
 
                 ms.leaveGroup(ia);
@@ -59,6 +60,11 @@ public class ClientMain {
 
             } catch (IOException e) {
                 e.printStackTrace();
+            } finally {
+                // provo a rilasciare la lock nel caso il thread sia stato interrotto mentre stava stampando
+                try {
+                    consoleLock.unlock();
+                } catch (IllegalMonitorStateException ignored) {}
             }
         });
 
@@ -66,9 +72,11 @@ public class ClientMain {
     }
 
     private void register() {
+        consoleLock.lock();
+
         terminal.nextLine();
-        System.out.print("username: "); String username = terminal.nextLine();
-        System.out.print("password: "); String password = terminal.nextLine();
+        print("username: "); String username = terminal.nextLine();
+        print("password: "); String password = terminal.nextLine();
 
         JsonObject json = new JsonObject();
         json.addProperty("username", username);
@@ -79,18 +87,17 @@ public class ClientMain {
 
         Response response = toResponseObject(performRequest(request));
 
-        System.out.println(response.printResponseFormat());
+        printLn(response.printResponseFormat());
 
-        if (response.getStatus() == 201) {
-            // TODO messaggio di successo
-        }
-
+        consoleLock.unlock();
     }
 
     private void login() {
+        consoleLock.lock();
+
         terminal.nextLine();
-        System.out.print("username: "); String username = terminal.nextLine();
-        System.out.print("password: "); String password = terminal.nextLine();
+        print("username: "); String username = terminal.nextLine();
+        print("password: "); String password = terminal.nextLine();
 
         JsonObject json = new JsonObject();
         json.addProperty("username", username);
@@ -101,7 +108,9 @@ public class ClientMain {
 
         Response response = toResponseObject(performRequest(request));
 
-        System.out.println(response.printResponseFormat());
+        printLn(response.printResponseFormat());
+
+        consoleLock.unlock();
 
         if (response.getStatus() == 200) {
             // se il login è andato a buon fine, il client si mette in ascolto di notifiche sui ranking locali
@@ -112,16 +121,16 @@ public class ClientMain {
                 int port = jsonResponse.get("port").getAsInt();
                 startBackgroundListener(group, port);
             } catch (JsonSyntaxException | NullPointerException e) {
-                System.out.println("Errore nell'elaborazione del corpo della risposta");
+                printLn("Errore nell'elaborazione del corpo della risposta");
             }
-
-
         }
     }
 
     private void logout() {
+        consoleLock.lock();
+
         terminal.nextLine();
-        System.out.print("username: "); String username = terminal.nextLine();
+        print("username: "); String username = terminal.nextLine();
 
         JsonObject json = new JsonObject();
         json.addProperty("username", username);
@@ -131,17 +140,17 @@ public class ClientMain {
 
         Response response = toResponseObject(performRequest(request));
 
-        System.out.println(response.printResponseFormat());
+        printLn(response.printResponseFormat());
 
-        if (response.getStatus() == 200) {
-            // TODO messaggio di successo
-        }
+        consoleLock.unlock();
     }
 
     private void searchHotel() {
+        consoleLock.lock();
+
         terminal.nextLine();
-        System.out.print("Nome Hotel: "); String hotel = terminal.nextLine();
-        System.out.print("Città: "); String citta = terminal.nextLine();
+        print("Nome Hotel: "); String hotel = terminal.nextLine();
+        print("Città: "); String citta = terminal.nextLine();
 
         JsonObject json = new JsonObject();
         json.addProperty("nomeHotel", hotel);
@@ -152,16 +161,16 @@ public class ClientMain {
 
         Response response = toResponseObject(performRequest(request));
 
-        System.out.println(response.printResponseFormat());
+        printLn(response.printResponseFormat());
 
-        if (response.getStatus() == 200) {
-            // TODO messaggio di successo
-        }
+        consoleLock.unlock();
     }
 
     private void searchAllHotels() {
+        consoleLock.lock();
+
         terminal.nextLine();
-        System.out.print("Città: "); String citta = terminal.nextLine();
+        print("Città: "); String citta = terminal.nextLine();
 
         JsonObject json = new JsonObject();
         json.addProperty("citta", citta);
@@ -171,22 +180,30 @@ public class ClientMain {
 
         Response response = toResponseObject(performRequest(request));
 
-        System.out.println(response.printResponseFormat());
+        printLn(response.printResponseFormat());
 
-        if (response.getStatus() == 200) {
-            // TODO messaggio di successo
-        }
+        consoleLock.unlock();
     }
 
     private void insertReview() {
+        consoleLock.lock();
+        // TODO GESTIRE CONVERSIONE NUMERI
         terminal.nextLine();
-        System.out.print("Nome Hotel: "); String hotel = terminal.nextLine();
-        System.out.print("Città: "); String citta = terminal.nextLine();
-        System.out.print("Global Score: "); double globalScore = Double.parseDouble(terminal.nextLine());
-        System.out.print("Pulizia: "); double pulizia = Double.parseDouble(terminal.nextLine());
-        System.out.print("Posizione: "); double posizione = Double.parseDouble(terminal.nextLine());
-        System.out.print("Servizi: "); double servizi = Double.parseDouble(terminal.nextLine());
-        System.out.print("Qualità/prezzo: "); double qualita = Double.parseDouble(terminal.nextLine());
+        print("Nome Hotel: "); String hotel = terminal.nextLine();
+        print("Città: "); String citta = terminal.nextLine();
+
+        double globalScore, pulizia, posizione, servizi, qualita;
+        try {
+            print("Global Score: ");globalScore = Double.parseDouble(terminal.nextLine());
+            print("Pulizia: ");pulizia = Double.parseDouble(terminal.nextLine());
+            print("Posizione: ");posizione = Double.parseDouble(terminal.nextLine());
+            print("Servizi: ");servizi = Double.parseDouble(terminal.nextLine());
+            print("Qualità/prezzo: ");qualita = Double.parseDouble(terminal.nextLine());
+        } catch (NullPointerException | NumberFormatException e) {
+            printLn("Errore nel valore inserito!");
+            consoleLock.unlock();
+            return;
+        }
 
         JsonObject rates = new JsonObject();
         rates.addProperty("cleaning", pulizia);
@@ -205,24 +222,22 @@ public class ClientMain {
 
         Response response = toResponseObject(performRequest(request));
 
-        System.out.println(response.printResponseFormat());
+        printLn(response.printResponseFormat());
 
-        if (response.getStatus() == 200) {
-            // TODO messaggio di successo
-        }
+        consoleLock.unlock();
     }
 
     private void showMyBadges() {
+        consoleLock.lock();
+
         terminal.nextLine();
         String request = "showMyBadges\n";
 
         Response response = toResponseObject(performRequest(request));
 
-        System.out.println(response.printResponseFormat());
+        printLn(response.printResponseFormat());
 
-        if (response.getStatus() == 200) {
-            // TODO messaggio di successo
-        }
+        consoleLock.unlock();
     }
 
     private String performRequest(String request) {
@@ -254,7 +269,8 @@ public class ClientMain {
     }
 
     public void waitForCommands() {
-        System.out.println("========================= HOTELIER: an HOTEL advIsor sERvice =========================");
+        consoleLock.lock();
+        printLn("========================= HOTELIER: an HOTEL advIsor sERvice =========================");
 
         String legenda = "Legenda comandi:\n" +
                 "\t1 -> registrati al servizio\n" +
@@ -266,15 +282,22 @@ public class ClientMain {
                 "\t7 -> mostra i miei badges\n" +
                 "\t0 -> chiudi il programma";
 
-        System.out.println(legenda);
+        printLn(legenda);
+
+        consoleLock.unlock();
 
         boolean end = false;
         while (!end) {
-            System.out.print("=>");
+            consoleLock.lock();
+            print("=>");
             int command = -1;
-//            try {
+            try {
                 command = terminal.nextInt();
-//            } catch (InputMismatchException ignored) {}
+            } catch (InputMismatchException ignored) {
+                // consumo il valore errato
+                terminal.next();
+            }
+            consoleLock.unlock();
             switch (command) {
                 case 0:
                     end = true;
@@ -301,7 +324,9 @@ public class ClientMain {
                     showMyBadges();
                     break;
                 default:
-                    System.out.println("COMANDO ERRATO!\n" + legenda);
+                    consoleLock.lock();
+                    printLn("COMANDO ERRATO!\n" + legenda);
+                    consoleLock.unlock();
                     break;
             }
         }
@@ -312,7 +337,7 @@ public class ClientMain {
     }
 
     public void start() {
-        System.out.println("Trying " + hostName + ":" + port + " ...");
+        printLn("Trying " + hostName + ":" + port + " ...");
         try (Socket socket = new Socket(hostName, port);
              Scanner in = new Scanner(socket.getInputStream());
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
@@ -322,17 +347,34 @@ public class ClientMain {
             this.out = out;
             this.terminal = terminal;
 
-            System.out.println("Connected to " + hostName);
+            printLn("Connected to " + hostName);
 
             waitForCommands();
 
-            shutdown();
-
-            System.out.println("Shutting down client...");
+            printLn("Shutting down client...");
 
         } catch (IOException e) {
             throw new RuntimeException(e);
+        } catch (Exception e) {
+            printLn("UNEXPETDED ERROR. SHUTTING DOWN");
+            e.printStackTrace();
+        } finally {
+            // provo a rilasciare la lock, nel caso non sia stat rilasciata correttamente dal programma
+            try {
+                consoleLock.unlock();
+            } catch (IllegalMonitorStateException ignored) {}
+            shutdown();
         }
+    }
+
+    private void print(String msg) {
+        System.out.print(msg);
+        System.out.flush();
+    }
+    
+    private void printLn(String msg) {
+        System.out.println(msg);
+        System.out.flush();
     }
 
     public static void main(String[] args) {
