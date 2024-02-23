@@ -17,13 +17,27 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class ClientMain {
     private String hostName;
+
     private int port;
+
+    // per leggere i messaggi inviati dal server
     private Scanner in;
+
+    // per scrivere messaggi al server
     private PrintWriter out;
+
+    // per leggere input da terminale
     private Scanner terminal;
+
     private Gson gson;
+
+    // attende i messaggi multicast
     private Thread listener;
+
+    // permette allo shutdown di interrompere il thread che attende un messaggio
     private AtomicBoolean stopListener;
+
+    // permette di gestire la concorrenza sulla console
     private ReentrantLock consoleLock;
 
     public ClientMain() {
@@ -40,19 +54,23 @@ public class ClientMain {
                 MulticastSocket ms = new MulticastSocket(port);
                 InetAddress ia = InetAddress.getByName(group);
                 ms.joinGroup(ia);
-                ms.setSoTimeout(2000); // ogni due secondi, se non riceve niente, controlla la guardia del while (permette la corretta terminazione del programma)
+                // ogni due secondi, se non riceve niente, controlla la guardia del while (permette la corretta terminazione del programma)
+                ms.setSoTimeout(2000);
 
                 byte[] buffer = new byte[2048];
                 DatagramPacket dp = new DatagramPacket(buffer, buffer.length);
                 while (!stopListener.get()) {
                     try {
+                        // attende di ricevere un messaggio
                         ms.receive(dp);
-                        int a = 2;
+
                         consoleLock.lock();
                         printLn("Nuovi primi posti:\n" + new String(dp.getData(), 0, dp.getLength()));
                         consoleLock.unlock();
 
-                    } catch (SocketTimeoutException ignored) {}
+                    } catch (SocketTimeoutException ignored) {
+                        // scaduto il timer sulla receive, controllo la guardia del while
+                    }
                 }
 
                 ms.leaveGroup(ia);
@@ -71,6 +89,10 @@ public class ClientMain {
         this.listener.start();
     }
 
+    /**
+     * Permette di gestire la registrazione<br>
+     * Richiede all'utente di inserire username e password
+     */
     private void register() {
         consoleLock.lock();
 
@@ -92,6 +114,10 @@ public class ClientMain {
         consoleLock.unlock();
     }
 
+    /**
+     * Permette di effettuare il login su server<br>
+     * Richiede username e password
+     */
     private void login() {
         consoleLock.lock();
 
@@ -126,6 +152,10 @@ public class ClientMain {
         }
     }
 
+    /**
+     * Permette di effettuare il logout<br>
+     * Richiede lo username dell'utente loggato su questa connessione
+     */
     private void logout() {
         consoleLock.lock();
 
@@ -145,6 +175,10 @@ public class ClientMain {
         consoleLock.unlock();
     }
 
+    /**
+     * Permette di cercare un hotel<br>
+     * Richiede nome e città dell'hotel
+     */
     private void searchHotel() {
         consoleLock.lock();
 
@@ -166,6 +200,10 @@ public class ClientMain {
         consoleLock.unlock();
     }
 
+    /**
+     * Permette di cercare gli hotel in una determinata città<br>
+     * Richiede di passare la città
+     */
     private void searchAllHotels() {
         consoleLock.lock();
 
@@ -185,9 +223,14 @@ public class ClientMain {
         consoleLock.unlock();
     }
 
+    /**
+     * Permette di inserire una recensione per un hotel<br>
+     * Richiede nome e città dell'hotel, e successivamente i diversi voti.
+     * I voti devono essere valori numerici, anche con virgola, compresi tra 0 e 5
+     */
     private void insertReview() {
         consoleLock.lock();
-        // TODO GESTIRE CONVERSIONE NUMERI
+
         terminal.nextLine();
         print("Nome Hotel: "); String hotel = terminal.nextLine();
         print("Città: "); String citta = terminal.nextLine();
@@ -195,16 +238,37 @@ public class ClientMain {
         double globalScore, pulizia, posizione, servizi, qualita;
         try {
             print("Global Score: ");globalScore = Double.parseDouble(terminal.nextLine());
+            if (globalScore < 0 || globalScore > 5) {
+                printLn("Errore intervallo global score! Il valore deve essere compreso tra 0 e 5");
+                return;
+            }
             print("Pulizia: ");pulizia = Double.parseDouble(terminal.nextLine());
+            if (pulizia < 0 || pulizia > 5) {
+                printLn("Errore intervallo pulizia! Il valore deve essere compreso tra 0 e 5");
+                return;
+            }
             print("Posizione: ");posizione = Double.parseDouble(terminal.nextLine());
+            if (posizione < 0 || posizione > 5) {
+                printLn("Errore intervallo posizione! Il valore deve essere compreso tra 0 e 5");
+                return;
+            }
             print("Servizi: ");servizi = Double.parseDouble(terminal.nextLine());
+            if (servizi < 0 || servizi > 5) {
+                printLn("Errore intervallo servizi! Il valore deve essere compreso tra 0 e 5");
+                return;
+            }
             print("Qualità/prezzo: ");qualita = Double.parseDouble(terminal.nextLine());
+            if (qualita < 0 || qualita > 5) {
+                printLn("Errore intervallo qualità! Il valore deve essere compreso tra 0 e 5");
+                return;
+            }
         } catch (NullPointerException | NumberFormatException e) {
             printLn("Errore nel valore inserito!");
             consoleLock.unlock();
             return;
         }
 
+        // i ratings delle categorie vanno in un sotto-oggetto
         JsonObject rates = new JsonObject();
         rates.addProperty("cleaning", pulizia);
         rates.addProperty("position", posizione);
@@ -227,6 +291,9 @@ public class ClientMain {
         consoleLock.unlock();
     }
 
+    /**
+     * Mostra i badge dell'utente (se connesso)
+     */
     private void showMyBadges() {
         consoleLock.lock();
 
@@ -240,6 +307,12 @@ public class ClientMain {
         consoleLock.unlock();
     }
 
+    /**
+     * Permette di eseguire la richiesta passata come stringa al server.
+     * Si aspetta di riceve un messaggio che termina appena viene trovata una riga vuota
+     * @param request richiesta da mandare, in formato json
+     * @return una stringa rappresentante la risposta del server
+     */
     private String performRequest(String request) {
         out.println(request);
 
@@ -253,6 +326,13 @@ public class ClientMain {
         return bodyBuilder.toString();
     }
 
+    /**
+     * Permette di prendere la risposta del server e trasformarla in un oggetto che distingue le diverse parti<br>
+     * Contiene lo status code, la descrizione associata allo status code, e il body
+     * @param response la risposta del server
+     * @return risposta del server come entità Response
+     * @see Response
+     */
     private Response toResponseObject(String response) {
         Scanner scanner = new Scanner(response);
         Integer status = scanner.nextInt();
@@ -268,6 +348,9 @@ public class ClientMain {
         return new Response(status, descrizione, bodyBuilder.toString());
     }
 
+    /**
+     * attende i comandi da tastiera
+     */
     public void waitForCommands() {
         consoleLock.lock();
         printLn("========================= HOTELIER: an HOTEL advIsor sERvice =========================");
@@ -280,6 +363,7 @@ public class ClientMain {
                 "\t5 -> cerca hotel per città\n" +
                 "\t6 -> inserisci recensione di un hotel\n" +
                 "\t7 -> mostra i miei badges\n" +
+                "\t8 -> mostra legenda comandi\n" +
                 "\t0 -> chiudi il programma";
 
         printLn(legenda);
@@ -323,6 +407,9 @@ public class ClientMain {
                 case 7:
                     showMyBadges();
                     break;
+                case 8:
+                    printLn(legenda);
+                    break;
                 default:
                     consoleLock.lock();
                     printLn("COMANDO ERRATO!\n" + legenda);
@@ -332,6 +419,10 @@ public class ClientMain {
         }
     }
 
+    /**
+     * Esegue le operazioni necessarie ad una corretta terminazione del server, ovvero avvisa il thread listener di uscire
+     * dal while
+     */
     private void shutdown() {
         this.stopListener.set(true);
     }
@@ -367,11 +458,19 @@ public class ClientMain {
         }
     }
 
+    /**
+     * Permette di eseguire la print con flush immediato del messaggio
+     * @param msg
+     */
     private void print(String msg) {
         System.out.print(msg);
         System.out.flush();
     }
-    
+
+    /**
+     * Permette di eseguire la println con flush immediato del messaggio
+     * @param msg
+     */
     private void printLn(String msg) {
         System.out.println(msg);
         System.out.flush();
