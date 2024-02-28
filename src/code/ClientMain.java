@@ -79,29 +79,25 @@ public class ClientMain {
 
                         // messaggio ricevuto: elabora l'array e lo inserisce nella mappa, mantenendo la lock
                         newFirstPositionLock.lock();
-                        // prendo la risposta come stringa
-                        String response = new String(dp.getData(), 0, dp.getLength());
-                        // creo la lista di prime posizioni
-                        ArrayList<FirstPositionHotel> newFirstPositions = null;
-                        try {
-                            newFirstPositions = gson.fromJson(response, listType);
-                        } catch (JsonSyntaxException ignored) {}
-                        if (newFirstPositions != null && !newFirstPositions.isEmpty()) {
-                            // se ci sono aggiornamenti, li metto nella mappa condivisa this.newPositions
-                            for (FirstPositionHotel newFirstPosition : newFirstPositions) {
-                                this.newFirstPositions.put(newFirstPosition.getCitta(), newFirstPosition.getNomeHotel());
+                            // prendo la risposta come stringa
+                            String response = new String(dp.getData(), 0, dp.getLength());
+                            // creo la lista di prime posizioni
+                            ArrayList<FirstPositionHotel> newFirstPositions = null;
+                            try {
+                                newFirstPositions = gson.fromJson(response, listType);
+                            } catch (JsonSyntaxException ignored) {}
+                            if (newFirstPositions != null && !newFirstPositions.isEmpty()) {
+                                // se ci sono aggiornamenti, li metto nella mappa condivisa this.newPositions
+                                for (FirstPositionHotel newFirstPosition : newFirstPositions) {
+                                    this.newFirstPositions.put(newFirstPosition.getCitta(), newFirstPosition.getNomeHotel());
+                                }
                             }
-                        }
-
                         newFirstPositionLock.unlock();
 
                     } catch (SocketTimeoutException ignored) {
                         // scaduto il timer sulla receive, controllo la guardia del while
                     }
                 }
-
-                ms.leaveGroup(ia);
-                ms.close();
 
             } catch (IOException e) {
                 e.printStackTrace();
@@ -110,10 +106,11 @@ public class ClientMain {
                 if (ms != null && ia != null) {
                     try {
                         ms.leaveGroup(ia);
+                        ms.close();
                     } catch (IOException ignored) {}
                 }
 
-                // provo a rilasciare la lock nel caso il thread sia stato interrotto mentre stava stampando
+                // provo a rilasciare la lock nel caso il thread sia stato interrotto mentre stava elaborando la risposta
                 try {
                     newFirstPositionLock.unlock();
                 } catch (IllegalMonitorStateException ignored) {}
@@ -129,7 +126,6 @@ public class ClientMain {
      */
     private void register() {
 
-//        terminal.nextLine();
         System.out.print("username: "); String username = terminal.nextLine();
         System.out.print("password: "); String password = terminal.nextLine();
 
@@ -152,7 +148,6 @@ public class ClientMain {
      */
     private void login() {
 
-//        terminal.nextLine();
         System.out.print("username: "); String username = terminal.nextLine();
         System.out.print("password: "); String password = terminal.nextLine();
 
@@ -188,7 +183,6 @@ public class ClientMain {
      */
     private void logout() {
 
-//        terminal.nextLine();
         System.out.print("username: "); String username = terminal.nextLine();
 
         JsonObject json = new JsonObject();
@@ -203,6 +197,11 @@ public class ClientMain {
 
         if (response.getStatus() == 200) {
             this.stopListener.set(true);
+
+            // cancello eventuali dati non letti dalla mappa, per evitare di stamparle quando l'utente non è loggato
+            newFirstPositionLock.lock();
+                newFirstPositions.clear();
+            newFirstPositionLock.unlock();
         }
 
     }
@@ -213,7 +212,6 @@ public class ClientMain {
      */
     private void searchHotel() {
 
-//        terminal.nextLine();
         System.out.print("Nome Hotel: "); String hotel = terminal.nextLine();
         System.out.print("Città: "); String citta = terminal.nextLine();
 
@@ -236,7 +234,6 @@ public class ClientMain {
      */
     private void searchAllHotels() {
 
-//        terminal.nextLine();
         System.out.print("Città: "); String citta = terminal.nextLine();
 
         JsonObject json = new JsonObject();
@@ -258,7 +255,6 @@ public class ClientMain {
      */
     private void insertReview() {
 
-//        terminal.nextLine();
         System.out.print("Nome Hotel: "); String hotel = terminal.nextLine();
         System.out.print("Città: "); String citta = terminal.nextLine();
 
@@ -376,24 +372,22 @@ public class ClientMain {
      */
     private void stampaPrimePosizioni() {
         newFirstPositionLock.lock();
+            if (!this.newFirstPositions.isEmpty()) {
+                StringBuilder builder = new StringBuilder("-------------------------\nNuovi primi posti:\n");
 
-        if (!this.newFirstPositions.isEmpty()) {
-            System.out.println(
-                    "-------------------------\n" +
-                    "Nuovi primi posti:"
-            );
+                // consuma tutte le città che hanno cambiato posizione e le elimina dalla mappa
+                Iterator<Map.Entry<String, String>> entryIterator = this.newFirstPositions.entrySet().iterator();
+                while (entryIterator.hasNext()) {
+                    Map.Entry<String, String> entry = entryIterator.next();
+                    builder.append("Città: ").append(entry.getKey())
+                            .append(", Nome Hotel: ").append(entry.getValue()).append("\n");
+                    entryIterator.remove();
+                }
 
-            // consuma tutte le città che hanno cambiato posizione e le elimina dalla mappa
-            Iterator<Map.Entry<String, String>> entryIterator = this.newFirstPositions.entrySet().iterator();
-            while (entryIterator.hasNext()) {
-                Map.Entry<String, String> entry = entryIterator.next();
-                System.out.println("Città: " + entry.getKey() + ", Nome Hotel: " + entry.getValue());
-                entryIterator.remove();
+                builder.append("-------------------------\n");
+
+                System.out.print(builder);
             }
-
-            System.out.println("-------------------------");
-        }
-
         newFirstPositionLock.unlock();
     }
 
@@ -418,12 +412,12 @@ public class ClientMain {
 
         boolean end = false;
         while (!end) {
-            // controllo se ci sono notifiche sulle prime posizioni, e nel caso stampo
-            stampaPrimePosizioni();
-
             int command = -1;
             boolean stop = false;
             do {
+                // controllo se ci sono notifiche sulle prime posizioni, e nel caso stampo
+                stampaPrimePosizioni();
+
                 System.out.print("=>");
                 try {
                     String line = terminal.nextLine();
