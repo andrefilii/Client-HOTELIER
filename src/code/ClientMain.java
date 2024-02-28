@@ -1,18 +1,20 @@
 package code;
 
+import code.entities.FirstPositionHotel;
 import code.entities.Response;
 import code.utils.AppConfig;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
+import com.google.gson.reflect.TypeToken;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.reflect.Type;
 import java.net.*;
-import java.util.InputMismatchException;
-import java.util.Scanner;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -39,7 +41,7 @@ public class ClientMain {
     private AtomicBoolean stopListener;
 
     // variabile utilizzata dal thread in background per salvare le nuove prime posizioni
-    private String newFirstPosition;
+    private Map<String, String> newFirstPositions;
     
     // permette di gestire la concorrenza sulla variabile condivisa newFirstPositions
     private ReentrantLock newFirstPositionLock;
@@ -50,13 +52,20 @@ public class ClientMain {
         gson = new GsonBuilder().setPrettyPrinting().create();
         stopListener = new AtomicBoolean(false);
         newFirstPositionLock = new ReentrantLock();
+        newFirstPositions = new HashMap<>();
     }
 
     private void startBackgroundListener(String group, int port) {
+        this.stopListener.set(false);
         this.listener = new Thread(() -> {
+            MulticastSocket ms = null;
+            InetAddress ia = null;
             try {
-                MulticastSocket ms = new MulticastSocket(port);
-                InetAddress ia = InetAddress.getByName(group);
+                // serve per l'elaborazione del'array di hotel
+                Type listType = new TypeToken<ArrayList<FirstPositionHotel>>() {}.getType();
+
+                ms = new MulticastSocket(port);
+                ia = InetAddress.getByName(group);
                 ms.joinGroup(ia);
                 // ogni due secondi, se non riceve niente, controlla la guardia del while (permette la corretta terminazione del programma)
                 ms.setSoTimeout(2000);
@@ -68,13 +77,23 @@ public class ClientMain {
                         // attende di ricevere un messaggio
                         ms.receive(dp);
 
-//                        consoleLock.lock();
+                        // messaggio ricevuto: elabora l'array e lo inserisce nella mappa, mantenendo la lock
                         newFirstPositionLock.lock();
-                        
-                        newFirstPosition = new String(dp.getData(), 0, dp.getLength());
-                        
+                        // prendo la risposta come stringa
+                        String response = new String(dp.getData(), 0, dp.getLength());
+                        // creo la lista di prime posizioni
+                        ArrayList<FirstPositionHotel> newFirstPositions = null;
+                        try {
+                            newFirstPositions = gson.fromJson(response, listType);
+                        } catch (JsonSyntaxException ignored) {}
+                        if (newFirstPositions != null && !newFirstPositions.isEmpty()) {
+                            // se ci sono aggiornamenti, li metto nella mappa condivisa this.newPositions
+                            for (FirstPositionHotel newFirstPosition : newFirstPositions) {
+                                this.newFirstPositions.put(newFirstPosition.getCitta(), newFirstPosition.getNomeHotel());
+                            }
+                        }
+
                         newFirstPositionLock.unlock();
-//                        consoleLock.unlock();
 
                     } catch (SocketTimeoutException ignored) {
                         // scaduto il timer sulla receive, controllo la guardia del while
@@ -87,9 +106,15 @@ public class ClientMain {
             } catch (IOException e) {
                 e.printStackTrace();
             } finally {
+                // esco dal gruppo multicast
+                if (ms != null && ia != null) {
+                    try {
+                        ms.leaveGroup(ia);
+                    } catch (IOException ignored) {}
+                }
+
                 // provo a rilasciare la lock nel caso il thread sia stato interrotto mentre stava stampando
                 try {
-//                    consoleLock.unlock();
                     newFirstPositionLock.unlock();
                 } catch (IllegalMonitorStateException ignored) {}
             }
@@ -103,9 +128,8 @@ public class ClientMain {
      * Richiede all'utente di inserire username e password
      */
     private void register() {
-//        consoleLock.lock();
 
-        terminal.nextLine();
+//        terminal.nextLine();
         System.out.print("username: "); String username = terminal.nextLine();
         System.out.print("password: "); String password = terminal.nextLine();
 
@@ -120,7 +144,6 @@ public class ClientMain {
 
         System.out.println(response.printResponseFormat());
 
-//        consoleLock.unlock();
     }
 
     /**
@@ -128,9 +151,8 @@ public class ClientMain {
      * Richiede username e password
      */
     private void login() {
-//        consoleLock.lock();
 
-        terminal.nextLine();
+//        terminal.nextLine();
         System.out.print("username: "); String username = terminal.nextLine();
         System.out.print("password: "); String password = terminal.nextLine();
 
@@ -145,7 +167,6 @@ public class ClientMain {
 
         System.out.println(response.printResponseFormat());
 
-//        consoleLock.unlock();
 
         if (response.getStatus() == 200) {
             // se il login è andato a buon fine, il client si mette in ascolto di notifiche sui ranking locali
@@ -166,9 +187,8 @@ public class ClientMain {
      * Richiede lo username dell'utente loggato su questa connessione
      */
     private void logout() {
-//        consoleLock.lock();
 
-        terminal.nextLine();
+//        terminal.nextLine();
         System.out.print("username: "); String username = terminal.nextLine();
 
         JsonObject json = new JsonObject();
@@ -181,7 +201,10 @@ public class ClientMain {
 
         System.out.println(response.printResponseFormat());
 
-//        consoleLock.unlock();
+        if (response.getStatus() == 200) {
+            this.stopListener.set(true);
+        }
+
     }
 
     /**
@@ -189,9 +212,8 @@ public class ClientMain {
      * Richiede nome e città dell'hotel
      */
     private void searchHotel() {
-//        consoleLock.lock();
 
-        terminal.nextLine();
+//        terminal.nextLine();
         System.out.print("Nome Hotel: "); String hotel = terminal.nextLine();
         System.out.print("Città: "); String citta = terminal.nextLine();
 
@@ -206,7 +228,6 @@ public class ClientMain {
 
         System.out.println(response.printResponseFormat());
 
-//        consoleLock.unlock();
     }
 
     /**
@@ -214,9 +235,8 @@ public class ClientMain {
      * Richiede di passare la città
      */
     private void searchAllHotels() {
-//        consoleLock.lock();
 
-        terminal.nextLine();
+//        terminal.nextLine();
         System.out.print("Città: "); String citta = terminal.nextLine();
 
         JsonObject json = new JsonObject();
@@ -229,7 +249,6 @@ public class ClientMain {
 
         System.out.println(response.printResponseFormat());
 
-//        consoleLock.unlock();
     }
 
     /**
@@ -238,9 +257,8 @@ public class ClientMain {
      * I voti devono essere valori numerici, anche con virgola, compresi tra 0 e 5
      */
     private void insertReview() {
-//        consoleLock.lock();
 
-        terminal.nextLine();
+//        terminal.nextLine();
         System.out.print("Nome Hotel: "); String hotel = terminal.nextLine();
         System.out.print("Città: "); String citta = terminal.nextLine();
 
@@ -273,7 +291,6 @@ public class ClientMain {
             }
         } catch (NullPointerException | NumberFormatException e) {
             System.out.println("Errore nel valore inserito!");
-//            consoleLock.unlock();
             return;
         }
 
@@ -297,23 +314,20 @@ public class ClientMain {
 
         System.out.println(response.printResponseFormat());
 
-//        consoleLock.unlock();
     }
 
     /**
      * Mostra i badge dell'utente (se connesso)
      */
     private void showMyBadges() {
-//        consoleLock.lock();
 
-        terminal.nextLine();
+//        terminal.nextLine();
         String request = "showMyBadges\n";
 
         Response response = toResponseObject(performRequest(request));
 
         System.out.println(response.printResponseFormat());
 
-//        consoleLock.unlock();
     }
 
     /**
@@ -358,10 +372,35 @@ public class ClientMain {
     }
 
     /**
+     * Stampa le nuove prime posizioni (se presenti), preservando concorrenza sulla mappa
+     */
+    private void stampaPrimePosizioni() {
+        newFirstPositionLock.lock();
+
+        if (!this.newFirstPositions.isEmpty()) {
+            System.out.println(
+                    "-------------------------\n" +
+                    "Nuovi primi posti:"
+            );
+
+            // consuma tutte le città che hanno cambiato posizione e le elimina dalla mappa
+            Iterator<Map.Entry<String, String>> entryIterator = this.newFirstPositions.entrySet().iterator();
+            while (entryIterator.hasNext()) {
+                Map.Entry<String, String> entry = entryIterator.next();
+                System.out.println("Città: " + entry.getKey() + ", Nome Hotel: " + entry.getValue());
+                entryIterator.remove();
+            }
+
+            System.out.println("-------------------------");
+        }
+
+        newFirstPositionLock.unlock();
+    }
+
+    /**
      * attende i comandi da tastiera
      */
     public void waitForCommands() {
-//        consoleLock.lock();
         System.out.println("========================= HOTELIER: an HOTEL advIsor sERvice =========================");
 
         String legenda = "Legenda comandi:\n" +
@@ -377,33 +416,28 @@ public class ClientMain {
 
         System.out.println(legenda);
 
-//        consoleLock.unlock();
-
         boolean end = false;
         while (!end) {
-//            consoleLock.lock();
             // controllo se ci sono notifiche sulle prime posizioni, e nel caso stampo
-            newFirstPositionLock.lock();
-            if (newFirstPosition != null) {
-                System.out.println(
-                    "-------------------------\n" +
-                    "Nuovi primi posti:\n" +
-                    newFirstPosition + "\n" +
-                    "-------------------------"
-                );
-                newFirstPosition = null;
-            }
-            newFirstPositionLock.unlock();
-            
-            System.out.print("=>");
+            stampaPrimePosizioni();
+
             int command = -1;
-            try {
-                command = terminal.nextInt();
-            } catch (InputMismatchException ignored) {
-                // consumo la riga errata
-                terminal.nextLine();
-            }
-//            consoleLock.unlock();
+            boolean stop = false;
+            do {
+                System.out.print("=>");
+                try {
+                    String line = terminal.nextLine();
+                    if (!line.isEmpty()) {
+                        command = Integer.parseInt(line);
+                        stop = true;
+                    }
+                } catch (NumberFormatException e) {
+                    // consumo la riga errata
+                    System.out.println("COMANDO ERRATO!");
+                    //terminal.nextLine();
+                }
+            } while(!stop);
+
             switch (command) {
                 case 0:
                     end = true;
@@ -433,16 +467,14 @@ public class ClientMain {
                     System.out.println(legenda);
                     break;
                 default:
-//                    consoleLock.lock();
-                    System.out.println("COMANDO ERRATO!\n" + legenda);
-//                    consoleLock.unlock();
+                    System.out.println("Nessun comando associato al codice!\n" + legenda);
                     break;
             }
         }
     }
 
     /**
-     * Esegue le operazioni necessarie ad una corretta terminazione del server, ovvero avvisa il thread listener di uscire
+     * Esegue le operazioni necessarie per una corretta terminazione del server, ovvero avvisa il thread listener di uscire
      * dal while
      */
     private void shutdown() {
@@ -472,9 +504,8 @@ public class ClientMain {
             System.out.println("UNEXPETDED ERROR. SHUTTING DOWN");
             e.printStackTrace();
         } finally {
-            // provo a rilasciare la lock, nel caso non sia stat rilasciata correttamente dal programma
+            // provo a rilasciare la lock, nel caso non sia stata rilasciata correttamente dal programma
             try {
-//                consoleLock.unlock();
                 newFirstPositionLock.unlock();
             } catch (IllegalMonitorStateException ignored) {}
             shutdown();
