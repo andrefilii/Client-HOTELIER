@@ -175,13 +175,7 @@ public class ClientMain {
      */
     private void logout() {
 
-        System.out.print("username: "); String username = terminal.nextLine();
-
-        JsonObject json = new JsonObject();
-        json.addProperty("username", username);
-
-        String request = "logout\n" +
-                gson.toJson(json) + "\n";
+        String request = "logout\n";
 
         Response response = toResponseObject(performRequest(request));
 
@@ -308,7 +302,6 @@ public class ClientMain {
      */
     private void showMyBadges() {
 
-//        terminal.nextLine();
         String request = "showMyBadges\n";
 
         Response response = toResponseObject(performRequest(request));
