@@ -41,17 +41,13 @@ public class ClientMain {
     private AtomicBoolean stopListener;
 
     // variabile utilizzata dal thread in background per salvare le nuove prime posizioni
-    private Map<String, String> newFirstPositions;
-    
-    // permette di gestire la concorrenza sulla variabile condivisa newFirstPositions
-    private ReentrantLock newFirstPositionLock;
+    private final Map<String, String> newFirstPositions;
 
     public ClientMain() {
         hostName = AppConfig.getServerAddress();
         port = AppConfig.getServerPort();
         gson = new GsonBuilder().setPrettyPrinting().create();
         stopListener = new AtomicBoolean(false);
-        newFirstPositionLock = new ReentrantLock();
         newFirstPositions = new HashMap<>();
     }
 
@@ -78,21 +74,22 @@ public class ClientMain {
                         ms.receive(dp);
 
                         // messaggio ricevuto: elabora l'array e lo inserisce nella mappa, mantenendo la lock
-                        newFirstPositionLock.lock();
+                        synchronized (this.newFirstPositions) {
                             // prendo la risposta come stringa
                             String response = new String(dp.getData(), 0, dp.getLength());
                             // creo la lista di prime posizioni
                             ArrayList<FirstPositionHotel> newFirstPositions = null;
                             try {
                                 newFirstPositions = gson.fromJson(response, listType);
-                            } catch (JsonSyntaxException ignored) {}
+                            } catch (JsonSyntaxException ignored) {
+                            }
                             if (newFirstPositions != null && !newFirstPositions.isEmpty()) {
                                 // se ci sono aggiornamenti, li metto nella mappa condivisa this.newPositions
                                 for (FirstPositionHotel newFirstPosition : newFirstPositions) {
                                     this.newFirstPositions.put(newFirstPosition.getCitta(), newFirstPosition.getNomeHotel());
                                 }
                             }
-                        newFirstPositionLock.unlock();
+                        }
 
                     } catch (SocketTimeoutException ignored) {
                         // scaduto il timer sulla receive, controllo la guardia del while
@@ -109,11 +106,6 @@ public class ClientMain {
                         ms.close();
                     } catch (IOException ignored) {}
                 }
-
-                // provo a rilasciare la lock nel caso il thread sia stato interrotto mentre stava elaborando la risposta
-                try {
-                    newFirstPositionLock.unlock();
-                } catch (IllegalMonitorStateException ignored) {}
             }
         });
 
@@ -198,10 +190,9 @@ public class ClientMain {
         if (response.getStatus() == 200) {
             this.stopListener.set(true);
 
-            // cancello eventuali dati non letti dalla mappa, per evitare di stamparle quando l'utente non è loggato
-            newFirstPositionLock.lock();
+            synchronized (this.newFirstPositions) {
                 newFirstPositions.clear();
-            newFirstPositionLock.unlock();
+            }
         }
 
     }
@@ -371,7 +362,7 @@ public class ClientMain {
      * Stampa le nuove prime posizioni (se presenti), preservando concorrenza sulla mappa
      */
     private void stampaPrimePosizioni() {
-        newFirstPositionLock.lock();
+        synchronized (this.newFirstPositions) {
             if (!this.newFirstPositions.isEmpty()) {
                 StringBuilder builder = new StringBuilder("-------------------------\nNuovi primi posti:\n");
 
@@ -388,7 +379,7 @@ public class ClientMain {
 
                 System.out.print(builder);
             }
-        newFirstPositionLock.unlock();
+        }
     }
 
     /**
@@ -498,10 +489,6 @@ public class ClientMain {
             System.out.println("UNEXPETDED ERROR. SHUTTING DOWN");
             e.printStackTrace();
         } finally {
-            // provo a rilasciare la lock, nel caso non sia stata rilasciata correttamente dal programma
-            try {
-                newFirstPositionLock.unlock();
-            } catch (IllegalMonitorStateException ignored) {}
             shutdown();
         }
     }
