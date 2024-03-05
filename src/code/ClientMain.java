@@ -171,7 +171,6 @@ public class ClientMain {
 
     /**
      * Permette di effettuare il logout<br>
-     * Richiede lo username dell'utente loggato su questa connessione
      */
     private void logout() {
 
